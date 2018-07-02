@@ -1,0 +1,361 @@
+<html>
+<head>
+  <title>Starting Code for 1st Project 2017 - with lights and textures</title>
+  <style>
+
+  body {
+    font-family: Monospace;
+    background-color: #f0f0f0;
+    margin: 0px;
+    overflow: hidden;
+  }
+
+  canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  </style>
+  <script src="lib/three.min.js"></script>
+  <script src="lib/stats.min.js"></script>
+  <script src="lib/Coordinates.js"></script>
+  <script src="lib/OrbitControls.js"></script>
+  <script src="lib/OBJLoader.js"></script>
+</head>
+<body>
+
+  <script type="text/x-glsl" id="vertex">
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying vec3 wPosition;
+  varying vec2 uVv;
+
+  void main() {
+    vec4 vPos = modelViewMatrix * vec4( position, 1.0 );
+    vPosition = vPos.xyz;
+    wPosition = (modelMatrix * vec4( position, 1.0 )).xyz;
+    vNormal = normalMatrix * normal;
+    uVv = uv;
+    gl_Position = projectionMatrix * vPos;
+  }
+  </script>
+
+  <script type="text/x-glsl" id="fragment_metal">
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying vec3 wPosition;
+  uniform vec3 cspec;
+  uniform samplerCube envMap;
+  uniform vec3 xyz;
+  const float PI = 3.14159;
+
+  vec3 FSchlick(float lDoth) {
+    return (cspec + (vec3(1.0)-cspec)*pow(1.0 - lDoth,5.0));
+  }
+
+  #extension GL_OES_standard_derivatives : enable
+
+  // http://en.wikibooks.org/wiki/GLSL_Programming/Applying_Matrix_Transformations
+  vec3 inverseTransformDirection( in vec3 dir, in mat4 matrix ) {
+    return normalize( ( vec4( dir, 0.0 ) * matrix ).xyz );
+  }
+
+  void main() {
+    vec3 n = normalize(vNormal);
+    vec3 v = normalize( -vPosition);
+    vec3 worldN = inverseTransformDirection( n, viewMatrix );
+    vec3 worldV = cameraPosition - wPosition ;
+    vec3 r = normalize( reflect(-worldV,worldN));
+    // small quantity to prevent divisions by 0
+    float nDotv = max(dot( n, v ),0.000001);
+    vec3 fresnel = FSchlick(nDotv);
+    // negate x to account for how cubemap is displayed on background
+    vec3 envLight = textureCube( envMap, vec3(-r.x, r.yz)).rgb;
+    // texture in sRGB, linearize
+    envLight = pow( envLight, vec3(2.2));
+    vec3 outRadiance = fresnel*envLight;
+    // gamma encode the final value
+    gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
+  }
+  </script>
+
+<script type="text/x-glsl" id="fragment_texture" >
+
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying vec3 wPosition;
+  varying vec2 uVv;
+  uniform vec3 pointLightPosition1;
+  uniform vec3 pointLightPosition2;
+  uniform vec3 pointLightPosition3;
+  uniform vec3 pointLightPosition4;
+  uniform vec3 clight;
+  uniform sampler2D specularMap;
+  uniform sampler2D diffuseMap;
+  uniform sampler2D roughnessMap;
+  uniform sampler2D normalMap;
+  uniform vec2 textureRepeat;
+  const float PI = 3.14159;
+
+  vec3 cdiff;
+  vec3 cspec;
+  float roughness;
+
+  vec3 FSchlick(float lDoth) {
+    return (cspec + (vec3(1.0)-cspec)*pow(1.0 - lDoth,5.0));
+  }
+
+  float DGGX(float nDoth, float alpha) {
+    float alpha2 = alpha*alpha;
+    float d = nDoth*nDoth*(alpha2-1.0)+1.0;
+    return (  alpha2 / (PI*d*d));
+  }
+
+  float G1(float dotProduct, float k) {
+    return (dotProduct / (dotProduct*(1.0-k) + k) );
+  }
+
+  float GSmith(float nDotv, float nDotl) {
+    float k = roughness*roughness;
+    return G1(nDotl,k)*G1(nDotv,k);
+  }
+
+
+  #extension GL_OES_standard_derivatives : enable
+
+  vec3 perturbNormal2Arb( vec3 eye_pos, vec3 surf_norm ) {
+
+    vec3 q0 = dFdx( eye_pos.xyz );
+    vec3 q1 = dFdy( eye_pos.xyz );
+    vec2 st0 = dFdx( uVv.st );
+    vec2 st1 = dFdy( uVv.st );
+
+    vec3 S = normalize(  q0 * st1.t - q1 * st0.t );
+    vec3 T = normalize( -q0 * st1.s + q1 * st0.s );
+    vec3 N =  surf_norm ;
+
+    vec3 mapN = normalize(texture2D( normalMap, uVv ).xyz * 2.0 - 1.0);
+    //mapN.xy = normalScale * mapN.xy;
+    mat3 tsn = mat3( S, T, N );
+    return normalize( tsn * mapN );
+
+  }
+
+  vec3 outRadianceLight(vec3 position){
+      vec4 lpos = viewMatrix * vec4(position, 1.0);
+      vec3 l = normalize(lpos.xyz - vPosition.xyz);
+
+      vec3 n = perturbNormal2Arb(vPosition , normalize( vNormal ));
+      vec3 v = normalize( -vPosition);
+
+      vec3 h = normalize(v + l);
+
+      float nDotl = max(dot( n, l ),0.000001);
+      float lDoth = max(dot( l, h ),0.000001);
+      float nDoth = max(dot( n, h ),0.000001);
+      float nDotv = max(dot( n, v ),0.000001);
+
+      vec3 fresnel = FSchlick(lDoth);
+
+      vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/(4.0*nDotl*nDotv);
+
+      return PI* clight * nDotl * BRDF;
+  }
+
+
+  void main() {
+    cdiff = texture2D( diffuseMap, uVv*textureRepeat ).rgb;
+    // texture in sRGB, linearize
+    cdiff = pow( cdiff, vec3(2.2));
+    cspec = texture2D( specularMap, uVv*textureRepeat ).rgb;
+    // texture in sRGB, linearize
+    cspec = pow( cspec, vec3(2.2));
+    roughness = texture2D( roughnessMap, uVv*textureRepeat).r; // no need to linearize roughness map
+
+    vec3 outRadiance = outRadianceLight(pointLightPosition1) + outRadianceLight(pointLightPosition2) + outRadianceLight(pointLightPosition3) + outRadianceLight(pointLightPosition4);
+
+    // gamma encode the final value
+    gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
+  }
+
+</script>
+
+<script type="text/x-glsl" id="fragment">
+
+
+
+
+</script>
+
+<script>
+
+var scene, camera, renderer, controls, stats;
+var material_path = 'textures/materials/';
+
+function Start() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+
+  renderer = new THREE.WebGLRenderer( {antialias: true} );
+  renderer.setSize( window.innerWidth, window.innerHeight );
+  renderer.setClearColor( 0xf0f0f0 );
+  renderer.setPixelRatio( window.devicePixelRatio );
+  renderer.gammaInput = true;
+  renderer.gammaOutput = true;
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild( renderer.domElement );
+
+  camera.position.set(0,0,4);
+  camera.lookAt( new THREE.Vector3(0,0,0));
+
+  //vertex shader
+  vs = document.getElementById("vertex").textContent;
+
+  //metal material and enviroment map loader
+  var textureLoader = new THREE.CubeTextureLoader();
+  textureLoader.setPath( 'textures/envMap/' );
+
+  var textureCube = textureLoader.load( [
+    'px.png', 'nx.png',
+    'py.png', 'ny.png',
+    'pz.png', 'nz.png'
+  ] );
+
+//  scene.background = textureCube;
+
+  var cspec_Wood = loadTexture(material_path + 'wood/spec.png');
+  var cdiff_Wood = loadTexture(material_path + 'wood/diff.png');
+  var roughness_Wood = loadTexture(material_path + 'wood/rough.png');
+  var normal_Wood = loadTexture(material_path + 'wood/norm.png');
+
+  var uniforms_wood = {
+    specularMap: { type: "t", value: cspec_Wood},
+    diffuseMap: { type: "t", value: cdiff_Wood},
+    roughnessMap: { type: "t", value: roughness_Wood},
+    normalMap : { type: "t", value: normal_Wood},
+    pointLightPosition1:	{ type: "v3", value: new THREE.Vector3(0,6,-2) },
+    pointLightPosition2:	{ type: "v3", value: new THREE.Vector3(0,-6,0) },
+    pointLightPosition3:	{ type: "v3", value: new THREE.Vector3(6,0,2) },
+    pointLightPosition4:	{ type: "v3", value: new THREE.Vector3(-6,0,2) },
+    clight:	{ type: "v3", value: new THREE.Vector3(1,1,1) },
+    textureRepeat: { type: "v2", value : new THREE.Vector2(1,1)}
+  };
+
+  fs_texture = document.getElementById("fragment_texture").textContent;
+
+  var wood_material = new THREE.ShaderMaterial({uniforms: uniforms_wood, vertexShader: vs, fragmentShader: fs_texture});
+
+  var uniforms_metal = {
+    cspec:	{ type: "v3", value: new THREE.Vector3(0.8,0.8,0.8) },
+    envMap:	{ type: "t", value: textureCube},
+  };
+
+
+  fs_metal = document.getElementById("fragment_metal").textContent;
+
+  var metal_material = new THREE.ShaderMaterial({uniforms: uniforms_metal, vertexShader: vs, fragmentShader: fs_metal});
+
+  // instantiate a loader
+  var loader = new THREE.OBJLoader();
+
+  var nSubMesh = 0;
+  var hueStep = 360/138;
+
+  // load a resource
+  loader.load(
+    // resource URL
+    'models/cream_bottle.obj',
+    // called when resource is loaded
+    function ( object ) {
+
+
+      object.traverse(function( child ){
+        var colore = new THREE.Color("hsl("+(nSubMesh*hueStep)+",100%,50%)");
+
+        switch (nSubMesh) {
+          case 131: case 114: case 58:{
+            child.material = metal_material;
+          }break;
+
+          case 1: case 11: case 33: case 32: case 40:{
+            child.material = wood_material;
+          }break;
+
+
+          default:
+          child.material = metal_material;
+        }
+
+        nSubMesh++;
+      });
+
+      console.log(nSubMesh);
+
+      object.scale.set(0.2,0.15,0.2);
+      object.position.set(0,-1.8,0);
+      scene.add( object );
+
+    },
+    // called when loading is in progresses
+    function ( xhr ) {
+
+      console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+
+    },
+    // called when loading has errors
+    function ( error ) {
+
+      console.log( 'An error happened' );
+
+    }
+  );
+
+  stats = new Stats();
+  stats.domElement.style.position = 'absolute';
+  stats.domElement.style.top = '0px';
+  document.body.appendChild( stats.domElement );
+
+
+  controls = new THREE.OrbitControls( camera );
+  controls.addEventListener( 'change', Render );
+
+  //controls.enablePan = false;
+
+  //controls.maxDistance = 20;
+  //controls.minDistance = 1;
+  //controls.maxPolarAngle = ;
+  //controls.update();
+
+
+}
+
+function Update() {
+  requestAnimationFrame( Update );
+  controls.update();
+  stats.update();
+  Render();
+}
+
+function Render() {
+  renderer.render(scene, camera);
+}
+
+function loadTexture(file) {
+  var texture = new THREE.TextureLoader().load( file , function ( texture ) {
+
+    texture.minFilter = THREE.LinearMipMapLinearFilter;
+    texture.anisotropy = renderer.getMaxAnisotropy();
+    texture.wrapS = texture.wrapT = THREE.MirroredRepeatWrapping;
+    texture.offset.set( 0, 0 );
+    texture.needsUpdate = true;
+    Render();
+  });
+  return texture;
+}
+
+Start();
+Update();
+
+</script>
+</body>
+</html>
