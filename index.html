@@ -1,28 +1,32 @@
+<!DOCTYPE html>
 <html>
 <head>
-  <title>Starting Code for 1st Project 2017 - with lights and textures</title>
+  <title>ACME - Arredo </title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="css/w3.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <style>
 
   body {
-    font-family: Monospace;
     background-color: #f0f0f0;
-    margin: 0px;
-    overflow: hidden;
   }
 
-  canvas {
-    width: 100%;
-    height: 100%;
+  #logo{
+    width: 15%;
+    height: 15%;
   }
+
+  #visualizer{
+    border: solid 1px black;
+  }
+
 
   </style>
   <script src="lib/three.min.js"></script>
-  <script src="lib/stats.min.js"></script>
   <script src="lib/Coordinates.js"></script>
   <script src="lib/OrbitControls.js"></script>
   <script src="lib/OBJLoader.js"></script>
-</head>
-<body>
 
   <script type="text/x-glsl" id="vertex">
   varying vec3 vNormal;
@@ -79,7 +83,7 @@
   }
   </script>
 
-<script type="text/x-glsl" id="fragment_texture" >
+  <script type="text/x-glsl" id="fragment_texture" >
 
   varying vec3 vNormal;
   varying vec3 vPosition;
@@ -90,6 +94,7 @@
   uniform vec3 pointLightPosition3;
   uniform vec3 pointLightPosition4;
   uniform vec3 clight;
+  uniform float radius;
   uniform sampler2D specularMap;
   uniform sampler2D diffuseMap;
   uniform sampler2D roughnessMap;
@@ -99,6 +104,7 @@
 
   vec3 cdiff;
   vec3 cspec;
+  vec3 clightAtt;
   float roughness;
 
   vec3 FSchlick(float lDoth) {
@@ -142,24 +148,156 @@
   }
 
   vec3 outRadianceLight(vec3 position){
-      vec4 lpos = viewMatrix * vec4(position, 1.0);
-      vec3 l = normalize(lpos.xyz - vPosition.xyz);
+    vec4 lpos = viewMatrix * vec4(position, 1.0);
+    vec3 l = normalize(lpos.xyz - vPosition.xyz);
 
-      vec3 n = perturbNormal2Arb(vPosition , normalize( vNormal ));
-      vec3 v = normalize( -vPosition);
+    vec3 n = perturbNormal2Arb(vPosition , normalize( vNormal ));
+    vec3 v = normalize( -vPosition);
 
-      vec3 h = normalize(v + l);
+    vec3 h = normalize(v + l);
 
-      float nDotl = max(dot( n, l ),0.000001);
-      float lDoth = max(dot( l, h ),0.000001);
-      float nDoth = max(dot( n, h ),0.000001);
-      float nDotv = max(dot( n, v ),0.000001);
+    //attenuazione della luce
+    float dist = abs(distance(lpos.xyz, vPosition.xyz));
+    float att = clamp(1.0 - dist/radius, 0.0, 1.0);
+    att *= att;
+    clightAtt = clight * att;
 
-      vec3 fresnel = FSchlick(lDoth);
+    float nDotl = max(dot( n, l ),0.000001);
+    float lDoth = max(dot( l, h ),0.000001);
+    float nDoth = max(dot( n, h ),0.000001);
+    float nDotv = max(dot( n, v ),0.000001);
 
-      vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/(4.0*nDotl*nDotv);
+    vec3 fresnel = FSchlick(lDoth);
 
-      return PI* clight * nDotl * BRDF;
+    vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/(4.0*nDotl*nDotv);
+
+    return PI* clightAtt * nDotl * BRDF;
+  }
+
+
+  void main() {
+    cdiff = texture2D( diffuseMap, uVv*textureRepeat ).rgb;
+    // texture in sRGB, linearize
+    cdiff = pow( cdiff, vec3(2.2));
+    cspec = texture2D( specularMap, uVv*textureRepeat ).rgb;
+    // texture in sRGB, linearize
+    cspec = pow( cspec, vec3(2.2));
+    roughness = texture2D( roughnessMap, uVv*textureRepeat).r;
+
+    vec3 outRadiance = outRadianceLight(pointLightPosition1) + outRadianceLight(pointLightPosition2) + outRadianceLight(pointLightPosition3) + outRadianceLight(pointLightPosition4);
+
+    // gamma encode the final value
+    gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
+  }
+
+  </script>
+
+  <script type="text/x-glsl" id="fragment_combo">
+
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying vec3 wPosition;
+  varying vec2 uVv;
+  uniform vec3 pointLightPosition1;
+  uniform vec3 pointLightPosition2;
+  uniform vec3 pointLightPosition3;
+  uniform vec3 pointLightPosition4;
+  uniform vec3 clight;
+  uniform float radius;
+  uniform sampler2D specularMap;
+  uniform sampler2D diffuseMap;
+  uniform sampler2D roughnessMap;
+  uniform sampler2D normalMap;
+  uniform samplerCube envMap;
+  uniform vec2 textureRepeat;
+  const float PI = 3.14159;
+
+  vec3 cdiff;
+  vec3 cspec;
+  vec3 clightAtt;
+  float roughness;
+
+  vec3 FSchlick(float lDoth) {
+    return (cspec + (vec3(1.0)-cspec)*pow(1.0 - lDoth,5.0));
+  }
+
+  float DGGX(float nDoth, float alpha) {
+    float alpha2 = alpha*alpha;
+    float d = nDoth*nDoth*(alpha2-1.0)+1.0;
+    return (  alpha2 / (PI*d*d));
+  }
+
+  float G1(float dotProduct, float k) {
+    return (dotProduct / (dotProduct*(1.0-k) + k) );
+  }
+
+  float GSmith(float nDotv, float nDotl) {
+    float k = roughness*roughness;
+    return G1(nDotl,k)*G1(nDotv,k);
+  }
+
+
+  #extension GL_OES_standard_derivatives : enable
+
+  vec3 perturbNormal2Arb( vec3 eye_pos, vec3 surf_norm ) {
+
+    vec3 q0 = dFdx( eye_pos.xyz );
+    vec3 q1 = dFdy( eye_pos.xyz );
+    vec2 st0 = dFdx( uVv.st );
+    vec2 st1 = dFdy( uVv.st );
+
+    vec3 S = normalize(  q0 * st1.t - q1 * st0.t );
+    vec3 T = normalize( -q0 * st1.s + q1 * st0.s );
+    vec3 N =  surf_norm ;
+
+    vec3 mapN = normalize(texture2D( normalMap, uVv ).xyz * 2.0 - 1.0);
+    //mapN.xy = normalScale * mapN.xy;
+    mat3 tsn = mat3( S, T, N );
+    return normalize( tsn * mapN );
+
+  }
+
+  #extension GL_OES_standard_derivatives : enable
+
+  // http://en.wikibooks.org/wiki/GLSL_Programming/Applying_Matrix_Transformations
+  vec3 inverseTransformDirection( in vec3 dir, in mat4 matrix ) {
+    return normalize( ( vec4( dir, 0.0 ) * matrix ).xyz );
+  }
+
+  vec3 outRadianceLight(vec3 position){
+    vec4 lpos = viewMatrix * vec4(position, 1.0);
+    vec3 l = normalize(lpos.xyz - vPosition.xyz);
+
+    vec3 n = perturbNormal2Arb(vPosition , normalize( vNormal ));
+    vec3 v = normalize( -vPosition);
+
+    vec3 h = normalize(v + l);
+
+    //attenuazione della luce
+    float dist = abs(distance(lpos.xyz, vPosition.xyz));
+    float att = clamp(1.0 - dist/radius, 0.0, 1.0);
+    att *= att;
+    clightAtt = clight * att;
+
+    vec3 worldN = inverseTransformDirection( n, viewMatrix );
+    vec3 worldV = cameraPosition - wPosition ;
+    vec3 r = normalize( reflect(-worldV,worldN));
+
+    float nDotl = max(dot( n, l ),0.000001);
+    float lDoth = max(dot( l, h ),0.000001);
+    float nDoth = max(dot( n, h ),0.000001);
+    float nDotv = max(dot( n, v ),0.000001);
+
+    vec3 fresnel = FSchlick(lDoth);
+
+    vec3 envLight = textureCube( envMap, vec3(-r.x, r.yz)).rgb;
+    envLight = pow( envLight, vec3(2.2));
+
+    vec3 fres_env = fresnel*envLight;
+
+    vec3 BRDF = (vec3(1.0)-fres_env)*cdiff/PI + fres_env*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/(4.0*nDotl*nDotv);
+
+    return PI* clightAtt * nDotl * BRDF;
   }
 
 
@@ -171,6 +309,7 @@
     // texture in sRGB, linearize
     cspec = pow( cspec, vec3(2.2));
     roughness = texture2D( roughnessMap, uVv*textureRepeat).r; // no need to linearize roughness map
+    // texture in sRGB, linearize
 
     vec3 outRadiance = outRadianceLight(pointLightPosition1) + outRadianceLight(pointLightPosition2) + outRadianceLight(pointLightPosition3) + outRadianceLight(pointLightPosition4);
 
@@ -178,184 +317,114 @@
     gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
   }
 
-</script>
+  </script>
 
-<script type="text/x-glsl" id="fragment">
+  <script src="js/product_visualizer.js">
+  </script>
+  <script src="js/event.js">
+  </script>
 
+</head>
 
-
-
-</script>
-
-<script>
-
-var scene, camera, renderer, controls, stats;
-var material_path = 'textures/materials/';
-
-function Start() {
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
-
-  renderer = new THREE.WebGLRenderer( {antialias: true} );
-  renderer.setSize( window.innerWidth, window.innerHeight );
-  renderer.setClearColor( 0xf0f0f0 );
-  renderer.setPixelRatio( window.devicePixelRatio );
-  renderer.gammaInput = true;
-  renderer.gammaOutput = true;
-  renderer.shadowMap.enabled = true;
-  document.body.appendChild( renderer.domElement );
-
-  camera.position.set(0,0,4);
-  camera.lookAt( new THREE.Vector3(0,0,0));
-
-  //vertex shader
-  vs = document.getElementById("vertex").textContent;
-
-  //metal material and enviroment map loader
-  var textureLoader = new THREE.CubeTextureLoader();
-  textureLoader.setPath( 'textures/envMap/' );
-
-  var textureCube = textureLoader.load( [
-    'px.png', 'nx.png',
-    'py.png', 'ny.png',
-    'pz.png', 'nz.png'
-  ] );
-
-//  scene.background = textureCube;
-
-  var cspec_Wood = loadTexture(material_path + 'wood/spec.png');
-  var cdiff_Wood = loadTexture(material_path + 'wood/diff.png');
-  var roughness_Wood = loadTexture(material_path + 'wood/rough.png');
-  var normal_Wood = loadTexture(material_path + 'wood/norm.png');
-
-  var uniforms_wood = {
-    specularMap: { type: "t", value: cspec_Wood},
-    diffuseMap: { type: "t", value: cdiff_Wood},
-    roughnessMap: { type: "t", value: roughness_Wood},
-    normalMap : { type: "t", value: normal_Wood},
-    pointLightPosition1:	{ type: "v3", value: new THREE.Vector3(0,6,-2) },
-    pointLightPosition2:	{ type: "v3", value: new THREE.Vector3(0,-6,0) },
-    pointLightPosition3:	{ type: "v3", value: new THREE.Vector3(6,0,2) },
-    pointLightPosition4:	{ type: "v3", value: new THREE.Vector3(-6,0,2) },
-    clight:	{ type: "v3", value: new THREE.Vector3(1,1,1) },
-    textureRepeat: { type: "v2", value : new THREE.Vector2(1,1)}
-  };
-
-  fs_texture = document.getElementById("fragment_texture").textContent;
-
-  var wood_material = new THREE.ShaderMaterial({uniforms: uniforms_wood, vertexShader: vs, fragmentShader: fs_texture});
-
-  var uniforms_metal = {
-    cspec:	{ type: "v3", value: new THREE.Vector3(0.8,0.8,0.8) },
-    envMap:	{ type: "t", value: textureCube},
-  };
+<body onload="Start();">
 
 
-  fs_metal = document.getElementById("fragment_metal").textContent;
+  <div>
+    <div>
+      <img id="logo" src="logo/logo.png"/>
+    </div>
+    <div class="w3-bar w3-black">
+      <a href="#" class="w3-bar-item w3-button">Home</a>
+      <a href="#" class="w3-bar-item w3-button">Bagno</a>
+      <a href="#" class="w3-bar-item w3-button">Cucina</a>
+      <a href="#" class="w3-bar-item w3-button">Camere</a>
+      <a href="#" class="w3-bar-item w3-button">Salotto</a>
+      <a href="#" class="w3-bar-item w3-button">Soggiorno</a>
+      <input type="text" class="w3-bar-item w3-input" placeholder="Search.."/>
+      <a href="#" class="w3-bar-item w3-button w3-black"><i class="fa fa-search"></i></a>
+    </div>
+  </div>
 
-  var metal_material = new THREE.ShaderMaterial({uniforms: uniforms_metal, vertexShader: vs, fragmentShader: fs_metal});
+  <!--
+  <div class="w3-bar">
+  <a href="#" class="w3-button">&laquo;</a>
+  <a href="#" class="w3-button">1</a>
+  <a href="#" class="w3-button">2</a>
+  <a href="#" class="w3-button">3</a>
+  <a href="#" class="w3-button">4</a>
+  <a href="#" class="w3-button">5</a>
+  <a href="#" class="w3-button">&raquo;</a>
+</div>
+-->
+<div class="w3-container">
 
-  // instantiate a loader
-  var loader = new THREE.OBJLoader();
+  <div class="w3-col w3-container m6 l3">
+    <ul style="list-style-type:none">
+      <li>
+        <input id="ww" class="w3-margin-right w3-border w3-border-red w3-bottombar w3-round-large"
+        type="image" onclick="changeMaterial('wood');changeMaterial('white');selected('ww')" src="img/ww.png"/>
+        <input id="wp" class="w3-border w3-round-large"
+        type="image" onclick="changeMaterial('wood');changeMaterial('pink');selected('wp')" src="img/wp.png"/>
+      </li>
+      <li>
+        <input id="jw" class="w3-margin-right w3-border w3-round-large"
+        type="image" onclick="changeMaterial('fabric');changeMaterial('white');selected('jw')" src="img/jw.png"/>
+        <input id="jp" class="w3-border w3-round-large"
+        type="image" onclick="changeMaterial('fabric');changeMaterial('pink');selected('jp')" src="img/jp.png"/>
+      </li>
+      <li>
+        <input id="cw" class="w3-margin-right w3-border w3-round-large"
+        type="image" onclick="changeMaterial('croc');changeMaterial('white');selected('cw')" src="img/cw.png"/>
+        <input id="cp" class="w3-border w3-round-large"
+        type="image" onclick="changeMaterial('croc');changeMaterial('pink');selected('cp')" src="img/cp.png"/>
+      </li>
+    </ul>
+  </div>
 
-  var nSubMesh = 0;
-  var hueStep = 360/138;
-
-  // load a resource
-  loader.load(
-    // resource URL
-    'models/cream_bottle.obj',
-    // called when resource is loaded
-    function ( object ) {
-
-
-      object.traverse(function( child ){
-        var colore = new THREE.Color("hsl("+(nSubMesh*hueStep)+",100%,50%)");
-
-        switch (nSubMesh) {
-          case 131: case 114: case 58:{
-            child.material = metal_material;
-          }break;
-
-          case 1: case 11: case 33: case 32: case 40:{
-            child.material = wood_material;
-          }break;
-
-
-          default:
-          child.material = metal_material;
-        }
-
-        nSubMesh++;
-      });
-
-      console.log(nSubMesh);
-
-      object.scale.set(0.2,0.15,0.2);
-      object.position.set(0,-1.8,0);
-      scene.add( object );
-
-    },
-    // called when loading is in progresses
-    function ( xhr ) {
-
-      console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
-
-    },
-    // called when loading has errors
-    function ( error ) {
-
-      console.log( 'An error happened' );
-
-    }
-  );
-
-  stats = new Stats();
-  stats.domElement.style.position = 'absolute';
-  stats.domElement.style.top = '0px';
-  document.body.appendChild( stats.domElement );
+  <div class="w3-col w3-container m6 l4 w3-margin-top" id="container">
+    <canvas id="visualizer" height="453"></canvas>
+  </div>
 
 
-  controls = new THREE.OrbitControls( camera );
-  controls.addEventListener( 'change', Render );
+  <div class="w3-col w3-container m12 l5 w3-margin-top">
+    <h4><b>Dispenser per sapone liquido - 255 ml</b></h4>
+    <table>
+      <tr>
+        <td>Colore:</td><td> <b id="colore">Bianco</b></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>Rivestimeno: </td><td> <b id="rivestimento">Legno</b></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>Prezzo:</td>
+        <td class="w3-text-red"> <b>EUR 12.50</b></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2">
+          <button class="w3-button w3-green">Aggiungi al carrello <i class="fa fa-cart-plus"></i></button>
+        </td>
+      </tr>
+    </table>
 
-  //controls.enablePan = false;
+  </div>
 
-  //controls.maxDistance = 20;
-  //controls.minDistance = 1;
-  //controls.maxPolarAngle = ;
-  //controls.update();
+</div>
 
 
-}
+<footer class="w3-container w3-black">
+  <div class="w3-left w3-col w3-container m6 l3">
+    <p>Made by Luca Fuccaro</p>
+  </div>
+  <div class="w3-right w3-right-align w3-col w3-container m6 l3">
+    <p>Logo made with <a href="https://www.designevo.com/en/" target="_blank" title="Free Online Logo Maker">DesignEvo</a></p>
+  </div>
+</footer>
 
-function Update() {
-  requestAnimationFrame( Update );
-  controls.update();
-  stats.update();
-  Render();
-}
-
-function Render() {
-  renderer.render(scene, camera);
-}
-
-function loadTexture(file) {
-  var texture = new THREE.TextureLoader().load( file , function ( texture ) {
-
-    texture.minFilter = THREE.LinearMipMapLinearFilter;
-    texture.anisotropy = renderer.getMaxAnisotropy();
-    texture.wrapS = texture.wrapT = THREE.MirroredRepeatWrapping;
-    texture.offset.set( 0, 0 );
-    texture.needsUpdate = true;
-    Render();
-  });
-  return texture;
-}
-
-Start();
-Update();
-
-</script>
 </body>
+
+
 </html>
