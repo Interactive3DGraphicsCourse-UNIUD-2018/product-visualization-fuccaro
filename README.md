@@ -3,6 +3,10 @@
 ![Preview image](screenshot/preview.png)
 
 
+##  Esecuzione
+
+Per una corretta visualizzazione è necessario l'utilizzo di un web server, per esempio Xampp. Per ulteriori informazioni consultare la documentazione Threejs alla pagina [How to run things locally](https://threejs.org/docs/#manual/introduction/How-to-run-things-locally).
+
 ## Introduzione
 
 Per il segunte progetto si è realizzato un configuratore di prodotto all'interno di un sito web di e-commerce.
