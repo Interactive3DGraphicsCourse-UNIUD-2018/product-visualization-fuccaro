@@ -22,7 +22,7 @@ Al modello caricato non sono state applicate le sue textures predefinite, sono s
 
 ### Materiale metallico
 
-Un materiale mettallico è stato realizzato attraverso l'uso di uno Shader per implementare l'effetto di riflessione. Per tale scopo è stata utilizzata una enviromentmap rappresentate l'interno di un bagno domestico.
+Un materiale mettallico è stato realizzato attraverso l'uso di uno Shader per implementare l'effetto di riflessione. Per tale scopo è stata utilizzata una enviroment map rappresentate l'interno di un bagno domestico.
 
 
 ### Materiale lucido
@@ -32,12 +32,12 @@ Per il materiale lucido è stato combinato il BRDF material con luce speculare e
 ### Texture
 
 Per il rivestimento, sono state utilizzate delle texture per tre materiali diversi: uno in legno, uno in denim (o tessuto di jeans) e un altro in finta pelle di coccodrillo di colore nero.
-In questo caso, per lo shader non è stato neccessario l'uso dell'enviromentmap, essendo che nessuno dei materiali possiede una caratteristica rifflettente.
+In questo caso, per lo shader non è stato neccessario l'uso dell'enviroment map, essendo che nessuno dei materiali possiede una caratteristica rifflettente.
 Le texture sono state scaricate dal sito [Substance Share](https://share.allegorithmic.com/).
 
-### Luci
+### Luci (posizionamento e attenuazione)
 
-Oltre alla enviromentmap sono state utilizzate anche quattro diverse luci, posizionate in modo da illuminare nel modo corretto l'oggetto nella scena. Una luce e stata posizionata sopra l'oggetto, due lateralmente e l'ultima sotto l'oggetto.
+Oltre alla enviroment map sono state utilizzate anche quattro diverse luci, posizionate in modo da illuminare nel modo corretto l'oggetto nella scena. Una luce e stata posizionata sopra l'oggetto, due lateralmente e l'ultima sotto l'oggetto. Per ogni luce si è deciso di implementare un effetto di _attenuazione_ a seconda della distanza dall'oggetto.
 
 
 ## Pagina web
